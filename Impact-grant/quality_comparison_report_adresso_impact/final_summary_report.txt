@@ -1,8 +1,5 @@
 Audio Quality Comparison Report: 'IMPACT' vs. 'ADReSSO'
 ================================================================================
-This report assumes that for all metrics, a higher score indicates better quality.
-Total samples in 'IMPACT': 1000
-Total samples in 'ADReSSO': 237
 
 --------------------------------------------------------------------------------
 METRIC SUMMARY: MOS
