@@ -1,0 +1,72 @@
+--- Characterizing Clinical Dataset ---
+Total recordings in dataset: 16213
+
+--- Metric: mos_pred ---
+Descriptive Statistics:
+count    16213.000000
+mean         1.762768
+std          0.469544
+min          0.297297
+5%           1.093942
+25%          1.428706
+50%          1.711242
+75%          2.051250
+95%          2.610989
+max          4.234799
+QR (Interquartile Range): 0.6225
+
+--- Metric: dis_pred ---
+Descriptive Statistics:
+count    16213.000000
+mean         3.246579
+std          0.490038
+min          1.229540
+5%           2.371588
+25%          2.894589
+50%          3.317786
+75%          3.634342
+95%          3.930494
+max          4.579584
+IQR (Interquartile Range): 0.7398
+
+--- Metric: col_pred ---
+Descriptive Statistics:
+count    16213.000000
+mean         2.218817
+std          0.442114
+min          0.843177
+5%           1.630878
+25%          1.889063
+50%          2.147061
+75%          2.473810
+95%          3.067981
+max          4.397819
+IQR (Interquartile Range): 0.5847
+
+--- Metric: loud_pred ---
+Descriptive Statistics:
+count    16213.000000
+mean         2.257925
+std          0.526668
+min          1.031527
+5%           1.522918
+25%          1.839016
+50%          2.189470
+75%          2.620937
+95%          3.214654
+max          4.421886
+IQR (Interquartile Range): 0.7819
+
+--- Metric: noi_pred ---
+Descriptive Statistics:
+count    16213.000000
+mean         1.912955
+std          0.377803
+min          0.887962
+5%           1.445370
+25%          1.665077
+50%          1.836449
+75%          2.077867
+95%          2.645915
+max          4.165162
+IQR (Interquartile Range): 0.4128

@@ -1,143 +1,141 @@
 import pandas as pd
-import seaborn as sns
+import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import mannwhitneyu
-import os
+import seaborn as sns
+from scipy.stats import percentileofscore
+from pathlib import Path
 
-# --- 1. CONFIGURATION ---
-# Update these file paths if your CSV files have different names
-cwd = os.getcwd()
-REFERENCE_CSV = os.path.join(cwd, 'partial_results', 'NISQA_results.csv')   # Your 20,000 professional samples
-CLINICAL_CSV = os.path.join(cwd, 'partial_results', 'impact_results copy.csv')     # Your 1,000 clinical samples
+def compare_audio_datasets(
+    reference_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    metrics_list: list,
+    output_dir: Path,
+    reference_name: str = 'Reference',
+    target_name: str = 'Target'
+):
+    """
+    Compares two datasets on specified audio quality metrics, saves summary
+    statistics, individual sample comparisons, and plots to an output directory.
 
-# List of metric columns to analyze
-METRICS_TO_ANALYZE = ['mos_pred', 'noi_pred', 'dis_pred', 'col_pred', 'loud_pred']
+    Args:
+        reference_df (pd.DataFrame): The reference (e.g., clinical) dataset.
+        target_df (pd.DataFrame): The target dataset to compare against the reference.
+        metrics_list (list): A list of column names for the metrics to compare.
+        output_dir (Path): The directory where all results (CSVs, plots) will be saved.
+        reference_name (str): A label for the reference dataset used in plots and reports.
+        target_name (str): A label for the target dataset used in plots and reports.
+    """
+    # --- 1. Setup and Validation ---
+    plot_dir = output_dir / 'plots'
+    output_dir.mkdir(exist_ok=True)
+    plot_dir.mkdir(exist_ok=True)
 
-# Create a directory to save the plots
-PLOTS_OUTPUT_DIR = os.path.join(cwd, 'plots')
-if not os.path.exists(PLOTS_OUTPUT_DIR):
-    os.makedirs(PLOTS_OUTPUT_DIR)
+    for df, name in [(reference_df, reference_name), (target_df, target_name)]:
+        missing_cols = [m for m in metrics_list if m not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Dataset '{name}' is missing required metric columns: {missing_cols}")
 
-# --- 2. DATA LOADING AND PREPARATION ---
+    summary_stats_list = []
+    individual_results_df = target_df.copy()
 
-def load_and_prepare_data(ref_file, clin_file):
-    """Loads and combines the two CSVs into a single DataFrame for easy plotting."""
-    try:
-        ref_df = pd.read_csv(ref_file)
-        clin_df = pd.read_csv(clin_file)
-    except FileNotFoundError as e:
-        print(f"Error: {e}. Make sure the CSV files are in the same directory as the script.")
-        return None
+    # --- 2. Process Each Metric ---
+    print(f"Processing {len(metrics_list)} metrics...")
+    for metric in metrics_list:
+        ref_stats = reference_df[metric].describe(percentiles=[.05, .25, .50, .75, .95])
+        ref_stats['dataset'] = reference_name
+        ref_stats['metric'] = metric
+        summary_stats_list.append(ref_stats)
 
-    # Add a 'source' column to identify which dataset each row came from
-    ref_df['source'] = 'Reference'
-    clin_df['source'] = 'Clinical'
-    
-    # Concatenate the two DataFrames into one
-    combined_df = pd.concat([ref_df, clin_df], ignore_index=True)
-    
-    print("Data loaded successfully.")
-    print(f"Reference samples: {len(ref_df)}")
-    print(f"Clinical samples:  {len(clin_df)}")
-    
-    return combined_df
-
-# --- 3. STATISTICAL ANALYSIS ---
-
-def perform_statistical_analysis(df, metrics):
-    """Performs a Mann-Whitney U test for each metric and returns a results table."""
-    print("\n--- Performing Statistical Analysis (Mann-Whitney U Test) ---")
-    
-    results = []
-    
-    # Get the data for each group
-    group_ref = df[df['source'] == 'Reference']
-    group_clin = df[df['source'] == 'Clinical']
-
-    for metric in metrics:
-        # Extract the specific metric series for each group
-        ref_series = group_ref[metric]
-        clin_series = group_clin[metric]
+        target_stats = target_df[metric].describe(percentiles=[.05, .25, .50, .75, .95])
+        target_stats['dataset'] = target_name
+        target_stats['metric'] = metric
+        summary_stats_list.append(target_stats)
         
-        # Perform the test
-        # We use this test because it doesn't assume a normal distribution, which is safer.
-        stat, p_value = mannwhitneyu(ref_series, clin_series, alternative='two-sided')
-        
-        results.append({
-            'Metric': metric,
-            'Reference Mean': ref_series.mean(),
-            'Clinical Mean': clin_series.mean(),
-            'Reference Median': ref_series.median(),
-            'Clinical Median': clin_series.median(),
-            'P-Value': p_value
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+        sns.histplot(reference_df[metric], kde=True, stat='density', color='blue', label=reference_name, alpha=0.5, bins=30, ax=ax1)
+        sns.histplot(target_df[metric], kde=True, stat='density', color='red', label=target_name, alpha=0.5, bins=30, ax=ax1)
+        ax1.axvline(ref_stats['mean'], color='blue', linestyle='--', linewidth=1.5, label=f'{reference_name} Mean')
+        ax1.axvline(target_stats['mean'], color='red', linestyle='--', linewidth=1.5, label=f'{target_name} Mean')
+        ax1.set_title(f'Distribution Comparison for {metric}')
+        ax1.set_xlabel(metric)
+        ax1.set_ylabel('Density')
+        ax1.legend()
+        ax1.grid(axis='y', linestyle='--', alpha=0.7)
+
+        plot_df = pd.DataFrame({
+            'value': pd.concat([reference_df[metric], target_df[metric]], ignore_index=True),
+            'dataset': [reference_name] * len(reference_df) + [target_name] * len(target_df)
         })
         
-    results_df = pd.DataFrame(results)
-    
-    # Format the p-value for better readability
-    results_df['P-Value (Formatted)'] = results_df['P-Value'].apply(
-        lambda p: f"{p:.2e}" if p < 0.001 else f"{p:.4f}"
-    )
-    results_df['Significant (p<0.05)'] = results_df['P-Value'].apply(lambda p: 'Yes' if p < 0.05 else 'No')
-    
-    return results_df[['Metric', 'Reference Mean', 'Clinical Mean', 'P-Value (Formatted)', 'Significant (p<0.05)']]
+        # --- THIS IS THE CORRECTED LINE ---
+        dynamic_palette = {reference_name: 'skyblue', target_name: 'lightcoral'}
+        sns.violinplot(y='value', x='dataset', data=plot_df, palette=dynamic_palette, inner='quartile', ax=ax2)
+        # ------------------------------------
+        
+        ax2.set_title(f'Violin Plot Comparison for {metric}')
+        ax2.set_ylabel(metric)
+        ax2.set_xlabel('Dataset')
+        ax2.grid(axis='y', linestyle='--', alpha=0.7)
 
-
-# --- 4. VISUALIZATION ---
-
-def generate_plots(df, metrics, output_dir):
-    """Generates and saves a comparison plot for each metric."""
-    print(f"\n--- Generating and saving plots to '{output_dir}' directory ---")
-    
-    for metric in metrics:
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-        
-        # --- FIXED PLOT 1: Box Plot ---
-        # Added hue='source' and legend=False to comply with modern Seaborn standards.
-        sns.boxplot(
-            x='source', 
-            y=metric, 
-            hue='source',  # Explicitly assign the variable for coloring
-            data=df, 
-            ax=axes[0], 
-            palette=['skyblue', 'salmon'],
-            legend=False   # Hide the redundant legend
-        )
-        axes[0].set_title(f'Box Plot of {metric}', fontsize=14, fontweight='bold')
-        axes[0].set_xlabel('Dataset', fontsize=12)
-        axes[0].set_ylabel('Predicted Score', fontsize=12)
-        
-        # Plot 2: Density Plot (This one was already correct as it used `hue`)
-        sns.kdeplot(data=df, x=metric, hue='source', fill=True, ax=axes[1], palette=['skyblue', 'salmon'])
-        axes[1].set_title(f'Density Distribution of {metric}', fontsize=14, fontweight='bold')
-        axes[1].set_xlabel('Predicted Score', fontsize=12)
-        axes[1].set_ylabel('Density', fontsize=12)
-        
-        # Final touches
-        plt.suptitle(f'Comparison of "{metric.upper()}" between Reference and Clinical Audio', fontsize=16, fontweight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-        
-        # Save the figure
-        plot_filename = os.path.join(output_dir, f'comparison_{metric}.png')
-        plt.savefig(plot_filename, dpi=150)
+        plt.tight_layout()
+        plt.savefig(plot_dir / f'{metric}_comparison.png')
         plt.close(fig)
-        
-        print(f"  -> Saved plot: {plot_filename}")
 
-# --- 5. MAIN EXECUTION ---
+        ref_mean = ref_stats['mean']
+        ref_std = ref_stats['std']
 
-if __name__ == '__main__':
-    # Step 1: Load data
-    combined_data = load_and_prepare_data(REFERENCE_CSV, CLINICAL_CSV)
+        if ref_std > 1e-9:
+            z_scores = (target_df[metric] - ref_mean) / ref_std
+        else:
+            z_scores = np.nan
+        individual_results_df[f'{metric}_z_score_vs_ref'] = z_scores
+
+        percentile_ranks = target_df[metric].apply(
+            lambda x: percentileofscore(reference_df[metric], x, kind='weak')
+        )
+        individual_results_df[f'{metric}_percentile_rank_vs_ref'] = percentile_ranks
+
+    # --- 3. Save Final Results to CSV ---
+    summary_df = pd.DataFrame(summary_stats_list).reset_index().rename(columns={'index': 'statistic'})
+    stat_order = ['metric', 'dataset', 'statistic', 'count', 'mean', 'std', 'min', '5%', '25%', '50%', '75%', '95%', 'max']
+    cols_to_select = [col for col in stat_order if col in summary_df.columns]
+    summary_df = summary_df[cols_to_select]
+    summary_df.to_csv(output_dir / 'summary_statistics.csv', index=False)
+
+    individual_results_df.to_csv(output_dir / 'target_vs_reference_individual_metrics.csv', index=False)
+
+    print(f"Analysis complete. All results saved to an output directory: '{output_dir}'")
+
+
+# --- MAIN EXECUTION BLOCK ---
+if __name__ == "__main__":
+    # --- 1. Configuration ---
+    BASE_DIR = Path.cwd()
+    REFERENCE_DATA_PATH = BASE_DIR / 'metrics' / 'redlat.csv'
+    TARGET_DATA_PATH = BASE_DIR / 'metrics' / 'impact.csv'
+
+
+    REFERENCE_NAME = 'REDLAT'
+    TARGET_NAME = 'IMPACT'
+
+    METRICS_TO_COMPARE = ['MOS', 'PESQ', 'STOI', 'SI-SDR']
+
+    OUTPUT_DIRECTORY = BASE_DIR / 'quality_comparison_report'
     
-    if combined_data is not None:
-        # Step 2: Run statistical analysis and print results
-        analysis_results = perform_statistical_analysis(combined_data, METRICS_TO_ANALYZE)
-        print("\n--- Statistical Results Summary ---")
-        print(analysis_results.to_string())
-        
-        # Step 3: Generate and save all plots
-        generate_plots(combined_data, METRICS_TO_ANALYZE, PLOTS_OUTPUT_DIR)
-        
-        print("\nAnalysis complete. Check the console for the stats table and the output folder for plots.")
+    # --- 2. Load Data ---
+    print(f"Loading reference dataset: {REFERENCE_DATA_PATH}")
+    reference_dataset = pd.read_csv(REFERENCE_DATA_PATH)
+    
+    print(f"Loading target dataset: {TARGET_DATA_PATH}")
+    target_dataset = pd.read_csv(TARGET_DATA_PATH)
+
+    # --- 3. Run Comparison ---
+    compare_audio_datasets(
+        reference_df=reference_dataset,
+        target_df=target_dataset,
+        metrics_list=METRICS_TO_COMPARE,
+        output_dir=OUTPUT_DIRECTORY,
+        reference_name=REFERENCE_NAME,
+        target_name=TARGET_NAME
+    )

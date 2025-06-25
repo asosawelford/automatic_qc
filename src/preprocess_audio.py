@@ -124,8 +124,8 @@ def process_audio_folder(source_folder, output_folder, duration_secs=30, crop_me
 if __name__ == '__main__':
     # --- CONFIGURE YOUR PATHS HERE ---
     # Replace these with the actual paths on your system
-    SOURCE_DIRECTORY = '/home/aleph/automatic_cq/dowloand_impact/downloaded_audios'
-    PROCESSED_DIRECTORY = '/home/aleph/automatic_cq/dowloand_impact/impact_prepro'
+    SOURCE_DIRECTORY = '/home/aleph/Downloads/adresso/train/cn'
+    PROCESSED_DIRECTORY = '/home/aleph/Downloads/adresso_prepro'
 
     # --- RUN THE BATCH PROCESSING ---
     # To use, simply create the folders and run the script.

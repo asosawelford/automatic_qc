@@ -1,0 +1,55 @@
+Audio Quality Comparison Report: 'IMPACT' vs. 'ADReSSO'
+================================================================================
+This report assumes that for all metrics, a higher score indicates better quality.
+Total samples in 'IMPACT': 1000
+Total samples in 'ADReSSO': 237
+
+--------------------------------------------------------------------------------
+METRIC SUMMARY: MOS
+--------------------------------------------------------------------------------
+[Aggregate Performance]
+  - Mean Score:   IMPACT (1.82) vs. ADReSSO (2.05)
+  - Median Score: IMPACT (1.76) vs. ADReSSO (2.00)
+
+[Distribution of 'IMPACT' Samples vs. 'ADReSSO' Population]
+  - Samples within Reference IQR (25th-75th percentile):   523 (52.3%)
+  - Samples better than Reference Median (>50th percentile):  295 (29.5%)
+  - Samples in Reference Top Quartile (>75th percentile):   91 (9.1%)
+
+--------------------------------------------------------------------------------
+METRIC SUMMARY: PESQ
+--------------------------------------------------------------------------------
+[Aggregate Performance]
+  - Mean Score:   IMPACT (1.91) vs. ADReSSO (2.12)
+  - Median Score: IMPACT (1.84) vs. ADReSSO (2.03)
+
+[Distribution of 'IMPACT' Samples vs. 'ADReSSO' Population]
+  - Samples within Reference IQR (25th-75th percentile):   766 (76.6%)
+  - Samples better than Reference Median (>50th percentile):  370 (37.0%)
+  - Samples in Reference Top Quartile (>75th percentile):   80 (8.0%)
+
+
+--------------------------------------------------------------------------------
+METRIC SUMMARY: STOI
+--------------------------------------------------------------------------------
+[Aggregate Performance]
+  - Mean Score:   IMPACT (0.88) vs. ADReSSO (0.85)
+  - Median Score: IMPACT (0.90) vs. ADReSSO (0.89)
+
+[Distribution of 'IMPACT' Samples vs. 'ADReSSO' Population]
+  - Samples within Reference IQR (25th-75th percentile):   746 (74.6%)
+  - Samples better than Reference Median (>50th percentile):  567 (56.7%)
+  - Samples in Reference Top Quartile (>75th percentile):   153 (15.3%)
+
+
+--------------------------------------------------------------------------------
+METRIC SUMMARY: SI-SDR
+--------------------------------------------------------------------------------
+[Aggregate Performance]
+  - Mean Score:   IMPACT (10.01) vs. ADReSSO (10.46)
+  - Median Score: IMPACT (10.59) vs. ADReSSO (11.61)
+
+[Distribution of 'IMPACT' Samples vs. 'ADReSSO' Population]
+  - Samples within Reference IQR (25th-75th percentile):   713 (71.3%)
+  - Samples better than Reference Median (>50th percentile):  426 (42.6%)
+  - Samples in Reference Top Quartile (>75th percentile):   76 (7.6%)
