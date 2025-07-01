@@ -1,0 +1,6 @@
+ffmpeg-python
+numpy
+torch
+torchaudio
+librosa
+scikit-learn

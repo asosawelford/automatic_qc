@@ -1,141 +1,151 @@
-import pandas as pd
+import os
+import sys
+import json
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import percentileofscore
-from pathlib import Path
+from typing import Dict, Any
 
-def compare_audio_datasets(
-    reference_df: pd.DataFrame,
-    target_df: pd.DataFrame,
-    metrics_list: list,
-    output_dir: Path,
-    reference_name: str = 'Reference',
-    target_name: str = 'Target'
-):
+# --- Import our analysis modules ---
+from src.standardize import load_and_standardize_audio
+from src.level_analysis import analyze_levels
+from src.noise_analysis import analyze_snr
+from src.speaker_count import estimate_speaker_count
+
+# --- Define Quality Thresholds in one place for easy tuning ---
+LOUDNESS_TARGET_LUFS = -19.0
+LOUDNESS_TOLERANCE_LU = 4.0  # Allows a range from -23 to -15 LUFS
+CLIPPING_MAX_PERCENT = 0.1
+SNR_MIN_DB = 15.0
+EXPECTED_SPEAKER_COUNT = 1
+
+class NumpyJSONEncoder(json.JSONEncoder):
     """
-    Compares two datasets on specified audio quality metrics, saves summary
-    statistics, individual sample comparisons, and plots to an output directory.
-
-    Args:
-        reference_df (pd.DataFrame): The reference (e.g., clinical) dataset.
-        target_df (pd.DataFrame): The target dataset to compare against the reference.
-        metrics_list (list): A list of column names for the metrics to compare.
-        output_dir (Path): The directory where all results (CSVs, plots) will be saved.
-        reference_name (str): A label for the reference dataset used in plots and reports.
-        target_name (str): A label for the target dataset used in plots and reports.
+    Custom JSON encoder for NumPy types.
+    This is necessary because the JSON library doesn't know how to handle
+    NumPy's specific float and integer types by default.
     """
-    # --- 1. Setup and Validation ---
-    plot_dir = output_dir / 'plots'
-    output_dir.mkdir(exist_ok=True)
-    plot_dir.mkdir(exist_ok=True)
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyJSONEncoder, self).default(obj)
 
-    for df, name in [(reference_df, reference_name), (target_df, target_name)]:
-        missing_cols = [m for m in metrics_list if m not in df.columns]
-        if missing_cols:
-            raise ValueError(f"Dataset '{name}' is missing required metric columns: {missing_cols}")
+def generate_quality_report(file_path: str) -> Dict[str, Any]:
+    """
+    Runs the full analysis pipeline on a single audio file and returns a structured report.
+    """
+    # --- Initialize the report dictionary ---
+    report = {
+        "source_file": os.path.basename(file_path),
+        "processing_status": "ERROR",
+        "error_message": None,
+        "analysis_results": {},
+        "quality_assessment": {}
+    }
 
-    summary_stats_list = []
-    individual_results_df = target_df.copy()
-
-    # --- 2. Process Each Metric ---
-    print(f"Processing {len(metrics_list)} metrics...")
-    for metric in metrics_list:
-        ref_stats = reference_df[metric].describe(percentiles=[.05, .25, .50, .75, .95])
-        ref_stats['dataset'] = reference_name
-        ref_stats['metric'] = metric
-        summary_stats_list.append(ref_stats)
-
-        target_stats = target_df[metric].describe(percentiles=[.05, .25, .50, .75, .95])
-        target_stats['dataset'] = target_name
-        target_stats['metric'] = metric
-        summary_stats_list.append(target_stats)
+    try:
+        # --- Step 1: Standardize Audio ---
+        sample_rate = 16000
+        audio_array = load_and_standardize_audio(file_path, sample_rate=sample_rate, max_duration_secs=30)
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        if audio_array is None:
+            report["error_message"] = "Failed during audio standardization (FFmpeg error)."
+            return report
 
-        sns.histplot(reference_df[metric], kde=True, stat='density', color='blue', label=reference_name, alpha=0.5, bins=30, ax=ax1)
-        sns.histplot(target_df[metric], kde=True, stat='density', color='red', label=target_name, alpha=0.5, bins=30, ax=ax1)
-        ax1.axvline(ref_stats['mean'], color='blue', linestyle='--', linewidth=1.5, label=f'{reference_name} Mean')
-        ax1.axvline(target_stats['mean'], color='red', linestyle='--', linewidth=1.5, label=f'{target_name} Mean')
-        ax1.set_title(f'Distribution Comparison for {metric}')
-        ax1.set_xlabel(metric)
-        ax1.set_ylabel('Density')
-        ax1.legend()
-        ax1.grid(axis='y', linestyle='--', alpha=0.7)
+        # --- Steps 2, 3, 4: Run all analyses ---
+        level_report = analyze_levels(audio_array, sample_rate)
+        snr_report = analyze_snr(audio_array, sample_rate)
+        speaker_report = estimate_speaker_count(audio_array, sample_rate)
 
-        plot_df = pd.DataFrame({
-            'value': pd.concat([reference_df[metric], target_df[metric]], ignore_index=True),
-            'dataset': [reference_name] * len(reference_df) + [target_name] * len(target_df)
-        })
+        # Check for analysis failures
+        if not all([level_report, snr_report, speaker_report]):
+             report["error_message"] = "One or more analysis modules failed."
+             return report
         
-        # --- THIS IS THE CORRECTED LINE ---
-        dynamic_palette = {reference_name: 'skyblue', target_name: 'lightcoral'}
-        sns.violinplot(y='value', x='dataset', data=plot_df, palette=dynamic_palette, inner='quartile', ax=ax2)
-        # ------------------------------------
+        report["analysis_results"] = {
+            "level": level_report,
+            "noise": snr_report,
+            "speaker": speaker_report
+        }
+
+        # --- Step 5: Apply Quality Logic ---
+        loudness_ok = (LOUDNESS_TARGET_LUFS - LOUDNESS_TOLERANCE_LU) <= level_report['integrated_lufs'] <= (LOUDNESS_TARGET_LUFS + LOUDNESS_TOLERANCE_LU)
+        clipping_ok = level_report['clipping_percent'] < CLIPPING_MAX_PERCENT
+        snr_ok = snr_report['snr_db'] >= SNR_MIN_DB
+        speaker_count_ok = speaker_report['estimated_speakers'] == EXPECTED_SPEAKER_COUNT
         
-        ax2.set_title(f'Violin Plot Comparison for {metric}')
-        ax2.set_ylabel(metric)
-        ax2.set_xlabel('Dataset')
-        ax2.grid(axis='y', linestyle='--', alpha=0.7)
+        overall_pass = all([loudness_ok, clipping_ok, snr_ok, speaker_count_ok])
 
-        plt.tight_layout()
-        plt.savefig(plot_dir / f'{metric}_comparison.png')
-        plt.close(fig)
+        report["quality_assessment"] = {
+            "loudness_ok": bool(loudness_ok),
+            "clipping_ok": bool(clipping_ok),
+            "snr_ok": bool(snr_ok),
+            "speaker_count_ok": bool(speaker_count_ok),
+            "overall_pass": bool(overall_pass)
+        }
+        
+        report["processing_status"] = "SUCCESS"
 
-        ref_mean = ref_stats['mean']
-        ref_std = ref_stats['std']
+    except Exception as e:
+        report["error_message"] = f"An unexpected error occurred: {str(e)}"
+    
+    return report
 
-        if ref_std > 1e-9:
-            z_scores = (target_df[metric] - ref_mean) / ref_std
-        else:
-            z_scores = np.nan
-        individual_results_df[f'{metric}_z_score_vs_ref'] = z_scores
+def process_path(input_path: str, output_dir: str):
+    """
+    Processes a single file or all audio files in a directory.
+    """
+    if not os.path.exists(input_path):
+        print(f"Error: Input path does not exist: {input_path}")
+        return
 
-        percentile_ranks = target_df[metric].apply(
-            lambda x: percentileofscore(reference_df[metric], x, kind='weak')
-        )
-        individual_results_df[f'{metric}_percentile_rank_vs_ref'] = percentile_ranks
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
 
-    # --- 3. Save Final Results to CSV ---
-    summary_df = pd.DataFrame(summary_stats_list).reset_index().rename(columns={'index': 'statistic'})
-    stat_order = ['metric', 'dataset', 'statistic', 'count', 'mean', 'std', 'min', '5%', '25%', '50%', '75%', '95%', 'max']
-    cols_to_select = [col for col in stat_order if col in summary_df.columns]
-    summary_df = summary_df[cols_to_select]
-    summary_df.to_csv(output_dir / 'summary_statistics.csv', index=False)
+    # Find all audio files to process
+    files_to_process = []
+    if os.path.isdir(input_path):
+        for filename in os.listdir(input_path):
+            if filename.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm')):
+                files_to_process.append(os.path.join(input_path, filename))
+    else:
+        files_to_process.append(input_path)
+    
+    print(f"Found {len(files_to_process)} audio file(s) to process.")
 
-    individual_results_df.to_csv(output_dir / 'target_vs_reference_individual_metrics.csv', index=False)
+    # Process each file
+    for file_path in files_to_process:
+        print(f"\nProcessing: {os.path.basename(file_path)}...")
+        
+        report_data = generate_quality_report(file_path)
+        
+        # Define output JSON path
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        output_json_path = os.path.join(output_dir, f"{base_name}_report.json")
+        
+        # Save the report as a JSON file
+        with open(output_json_path, 'w') as f:
+            json.dump(report_data, f, indent=4, cls=NumpyJSONEncoder)
+        
+        print(f"-> Report saved to: {output_json_path}")
 
-    print(f"Analysis complete. All results saved to an output directory: '{output_dir}'")
 
-
-# --- MAIN EXECUTION BLOCK ---
 if __name__ == "__main__":
-    # --- 1. Configuration ---
-    BASE_DIR = Path.cwd()
-    REFERENCE_DATA_PATH = BASE_DIR / 'metrics' / 'redlat.csv'
-    TARGET_DATA_PATH = BASE_DIR / 'metrics' / 'impact.csv'
+    if len(sys.argv) < 2:
+        print("\n--- Audio Quality Assessment Pipeline ---")
+        print("Usage:")
+        print("  python main.py <path_to_audio_file_or_directory>")
+        print("\nOptional:")
+        print("  python main.py <input_path> <output_directory>")
+        sys.exit(1)
 
-
-    REFERENCE_NAME = 'REDLAT'
-    TARGET_NAME = 'IMPACT'
-
-    METRICS_TO_COMPARE = ['MOS', 'PESQ', 'STOI', 'SI-SDR']
-
-    OUTPUT_DIRECTORY = BASE_DIR / 'quality_comparison_report'
+    input_path = sys.argv[1]
     
-    # --- 2. Load Data ---
-    print(f"Loading reference dataset: {REFERENCE_DATA_PATH}")
-    reference_dataset = pd.read_csv(REFERENCE_DATA_PATH)
+    # If output directory is not specified, create one named 'reports'
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else "reports"
     
-    print(f"Loading target dataset: {TARGET_DATA_PATH}")
-    target_dataset = pd.read_csv(TARGET_DATA_PATH)
-
-    # --- 3. Run Comparison ---
-    compare_audio_datasets(
-        reference_df=reference_dataset,
-        target_df=target_dataset,
-        metrics_list=METRICS_TO_COMPARE,
-        output_dir=OUTPUT_DIRECTORY,
-        reference_name=REFERENCE_NAME,
-        target_name=TARGET_NAME
-    )
+    process_path(input_path, output_dir)
+    print("\nProcessing complete.")
