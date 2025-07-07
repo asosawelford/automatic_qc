@@ -4,7 +4,7 @@ import numpy as np
 def load_and_standardize_audio(
     audio_path: str, 
     sample_rate: int = 16000, 
-    max_duration_secs: int = 30,
+    max_duration_secs: int = 300000,
     crop_method: str = 'start'
 ) -> np.ndarray:
     """

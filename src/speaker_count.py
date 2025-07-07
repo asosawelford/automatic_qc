@@ -1,69 +1,112 @@
+
+import torch
 import numpy as np
-import librosa
-from sklearn.mixture import GaussianMixture
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from speechbrain.inference import EncoderClassifier
+from sklearn.cluster import AgglomerativeClustering
+
+# --- Re-using our VAD utility ---
 from src.vad_utils import get_speech_timestamps
 
+# --- Model Caching for performance ---
+_SPEAKER_MODEL = None
+
+def _load_speaker_model():
+    """Loads the SpeechBrain x-vector model, caching it globally."""
+    global _SPEAKER_MODEL
+    if _SPEAKER_MODEL is None:
+        print("Initializing speaker embedding model (SpeechBrain x-vector)...")
+        # This will download the model on the first run
+        _SPEAKER_MODEL = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-xvect-voxceleb",
+            savedir="pretrained_models/spkrec-xvect-voxceleb"
+        )
+    return _SPEAKER_MODEL
+
+def _create_speech_chunks(
+    audio_array: np.ndarray,
+    speech_timestamps: List[Dict[str, int]],
+    chunk_size: int = 24000, # 1.5 seconds * 16000 Hz
+    hop_size: int = 8000     # 0.5 seconds * 16000 Hz
+) -> List[np.ndarray]:
+    """
+    Creates overlapping chunks of audio from speech segments.
+    This ensures each embedding is calculated on a reasonably long segment.
+    """
+    chunks = []
+    for segment in speech_timestamps:
+        start, end = segment['start'], segment['end']
+        for i in range(start, end - chunk_size + 1, hop_size):
+            chunks.append(audio_array[i : i + chunk_size])
+    
+    # If there are no chunks but there was speech, it means speech was too short.
+    # We take the longest speech segment as a single chunk.
+    if not chunks and speech_timestamps:
+        longest_segment = max(speech_timestamps, key=lambda s: s['end'] - s['start'])
+        chunks.append(audio_array[longest_segment['start']:longest_segment['end']])
+
+    return chunks
+
 def estimate_speaker_count(
-    audio_array: np.ndarray, 
+    audio_array: np.ndarray,
     sample_rate: int,
-    max_speakers: int = 3
+    distance_threshold: float = 0.15
 ) -> Optional[Dict[str, int]]:
     """
-    Estimates the number of speakers using MFCCs and Gaussian Mixture Models.
-    ...
+    Estimates the number of speakers using x-vector embeddings and clustering.
+
+    Args:
+        audio_array (np.ndarray): Mono float32 audio.
+        sample_rate (int): The sample rate (must be 16000).
+        distance_threshold (float): The clustering threshold. A key parameter to tune.
+                                    Represents the max cosine distance for two embeddings
+                                    to be considered from the same speaker.
+                                    Good values are typically between 0.4 and 0.7.
+
+    Returns:
+        A dictionary with the estimated speaker count, or None on error.
     """
+    # 1. Load model and get speech segments
+    model = _load_speaker_model()
     speech_timestamps = get_speech_timestamps(audio_array, sample_rate)
-    
+
     if not speech_timestamps:
-        print("Warning: No speech detected, cannot estimate speaker count.")
         return {'estimated_speakers': 0}
 
-    speech_segments = [audio_array[ts['start']:ts['end']] for ts in speech_timestamps]
-    speech_audio = np.concatenate(speech_segments)
+    # 2. Create overlapping chunks of speech audio
+    speech_chunks = _create_speech_chunks(audio_array, speech_timestamps)
 
-    # Check if speech audio is effectively silent after VAD
-    if np.max(np.abs(speech_audio)) < 1e-4:
-        print("Warning: Speech segments are silent, cannot estimate speaker count.")
-        return {'estimated_speakers': 0}
-
-    mfccs = librosa.feature.mfcc(y=speech_audio, sr=sample_rate, n_mfcc=13).T
-
-    # Not enough distinct frames to analyze
-    if mfccs.shape[0] < 2:
+    if not speech_chunks:
+        # This case happens if speech exists but is shorter than the minimum chunk size
         return {'estimated_speakers': 1}
 
-    n_components_range = range(1, max_speakers + 1)
-    bics = []
+    # 3. Extract x-vector embeddings for each chunk
+    embeddings = []
+    for chunk in speech_chunks:
+        # Model expects a batch, so we add a dimension
+        tensor_chunk = torch.from_numpy(chunk).unsqueeze(0)
+        with torch.no_grad():
+            embedding = model.encode_batch(tensor_chunk)
+        # Normalize the embedding (good practice) and remove batch dimension
+        embedding = torch.nn.functional.normalize(embedding, p=2, dim=2)
+        embeddings.append(embedding.squeeze().numpy())
     
-    for n_components in n_components_range:
-        # --- THE FIXES ---
-        # 1. More robust sanity check: We need more data points than components.
-        if mfccs.shape[0] < n_components:
-            break # Can't test this or higher component counts
-
-        # 2. Add regularization (reg_covar) to prevent matrix errors on uniform data.
-        gmm = GaussianMixture(
-            n_components=n_components, 
-            covariance_type='full', 
-            random_state=0,
-            reg_covar=1e-6 # This is the key to stability
-        )
-        try:
-            gmm.fit(mfccs)
-            bics.append(gmm.bic(mfccs))
-        except ValueError:
-            # If it still fails, we can't consider this n_component.
-            # Append a very large number so it won't be chosen as the minimum.
-            bics.append(np.inf)
-            continue
-            
-    if not bics or np.all(np.isinf(bics)):
-        # This can happen if all GMM fits fail, e.g., on very short/weird audio.
-        print("Warning: Could not fit any GMM. Defaulting to 1 speaker.")
+    if len(embeddings) == 1:
+        # Only one chunk of speech could be analyzed
         return {'estimated_speakers': 1}
 
-    # The number of speakers is the one with the lowest BIC score
-    estimated_speakers = n_components_range[np.argmin(bics)]
+    embeddings_array = np.array(embeddings)
 
-    return {'estimated_speakers': estimated_speakers}
+    # 4. Cluster the embeddings to find the number of unique speakers
+    # We use Agglomerative Clustering with a distance threshold.
+    # This avoids having to guess the number of speakers beforehand.
+    clustering = AgglomerativeClustering(
+        n_clusters=None,
+        distance_threshold=distance_threshold,
+        metric='cosine', # Use 'cosine' for comparing embeddings
+        linkage='complete'
+    )
+    clustering.fit(embeddings_array)
+
+    num_speakers = clustering.n_clusters_
+    return {'estimated_speakers': num_speakers}

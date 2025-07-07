@@ -11,10 +11,10 @@ from src.noise_analysis import analyze_snr
 from src.speaker_count import estimate_speaker_count
 
 # --- Define Quality Thresholds in one place for easy tuning ---
-LOUDNESS_TARGET_LUFS = -19.0
-LOUDNESS_TOLERANCE_LU = 4.0  # Allows a range from -23 to -15 LUFS
+LOUDNESS_TARGET_LUFS = -14.0
+LOUDNESS_TOLERANCE_LU = 10.0  # Allows a range from -24 to -4 LUFS
 CLIPPING_MAX_PERCENT = 0.1
-SNR_MIN_DB = 15.0
+SNR_MIN_DB = 9.0
 EXPECTED_SPEAKER_COUNT = 1
 
 class NumpyJSONEncoder(json.JSONEncoder):
@@ -48,7 +48,7 @@ def generate_quality_report(file_path: str) -> Dict[str, Any]:
     try:
         # --- Step 1: Standardize Audio ---
         sample_rate = 16000
-        audio_array = load_and_standardize_audio(file_path, sample_rate=sample_rate, max_duration_secs=30)
+        audio_array = load_and_standardize_audio(file_path, sample_rate=sample_rate, max_duration_secs=3000000)
         
         if audio_array is None:
             report["error_message"] = "Failed during audio standardization (FFmpeg error)."
