@@ -1,0 +1,2 @@
+Fijarnos relaciones espurias en base a evalaudor.
+Hay registro de que evaluador hace cada entrevista.

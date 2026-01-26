@@ -3,3 +3,4 @@ __pycache__/
 db/
 reports/
 pretrained_models/
+.vscode/

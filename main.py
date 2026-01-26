@@ -9,13 +9,16 @@ from src.standardize import load_and_standardize_audio
 from src.level_analysis import analyze_levels
 from src.noise_analysis import analyze_snr
 from src.speaker_count import estimate_speaker_count
+from src.vad_utils import analyze_speech_activity
 
-# --- Define Quality Thresholds in one place for easy tuning ---
+
+# --- Quality Thresholds ---
 LOUDNESS_TARGET_LUFS = -14.0
 LOUDNESS_TOLERANCE_LU = 10.0  # Allows a range from -24 to -4 LUFS
 CLIPPING_MAX_PERCENT = 0.1
 SNR_MIN_DB = 9.0
 EXPECTED_SPEAKER_COUNT = 1
+MIN_SPEECH_DURATION_S = 10
 
 class NumpyJSONEncoder(json.JSONEncoder):
     """
@@ -58,16 +61,18 @@ def generate_quality_report(file_path: str) -> Dict[str, Any]:
         level_report = analyze_levels(audio_array, sample_rate)
         snr_report = analyze_snr(audio_array, sample_rate)
         speaker_report = estimate_speaker_count(audio_array, sample_rate)
+        speech_duration = analyze_speech_activity(audio_array, sample_rate)
 
         # Check for analysis failures
-        if not all([level_report, snr_report, speaker_report]):
+        if not all([level_report, snr_report, speaker_report, speech_duration]):
              report["error_message"] = "One or more analysis modules failed."
              return report
         
         report["analysis_results"] = {
             "level": level_report,
             "noise": snr_report,
-            "speaker": speaker_report
+            "speaker": speaker_report,
+            "speech_duration": speech_duration,
         }
 
         # --- Step 5: Apply Quality Logic ---
@@ -75,14 +80,16 @@ def generate_quality_report(file_path: str) -> Dict[str, Any]:
         clipping_ok = level_report['clipping_percent'] < CLIPPING_MAX_PERCENT
         snr_ok = snr_report['snr_db'] >= SNR_MIN_DB
         speaker_count_ok = speaker_report['estimated_speakers'] == EXPECTED_SPEAKER_COUNT
-        
-        overall_pass = all([loudness_ok, clipping_ok, snr_ok, speaker_count_ok])
+        duration_ok =  speech_duration > MIN_SPEECH_DURATION_S
+
+        overall_pass = all([loudness_ok, clipping_ok, snr_ok, speaker_count_ok, duration_ok])
 
         report["quality_assessment"] = {
             "loudness_ok": bool(loudness_ok),
             "clipping_ok": bool(clipping_ok),
             "snr_ok": bool(snr_ok),
             "speaker_count_ok": bool(speaker_count_ok),
+            "duration_ok": bool(duration_ok),
             "overall_pass": bool(overall_pass)
         }
         
