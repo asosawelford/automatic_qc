@@ -1,0 +1,8 @@
+{
+    "source_file": "audio.webm",
+    "processing_status": "ERROR",
+    "error_message": "Failed during audio standardization (FFmpeg error).",
+    "analysis_results": {},
+    "quality_assessment": {},
+    "participant_code": "test"
+}
