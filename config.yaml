@@ -1,0 +1,97 @@
+# Automatic QC Configuration File
+# Copy this to config.yaml and customize as needed
+
+# Quality thresholds for audio assessment
+quality_thresholds:
+  # Loudness target and tolerance (EBU R128 standard)
+  loudness_target_lufs: -14.0       # Target integrated loudness in LUFS
+  loudness_tolerance_lu: 10.0       # Tolerance range (allows -24 to -4 LUFS)
+
+  # Clipping detection
+  clipping_max_percent: 0.1         # Maximum allowed clipping (0.1%)
+
+  # Signal-to-noise ratio
+  snr_min_db: 9.0                   # Minimum SNR in decibels
+
+  # Speaker count expectations
+  min_speaker_count: 1              # Minimum speakers (1 = solo participant)
+  max_speaker_count: 2              # Maximum speakers (2 = participant + examiner)
+
+  # Speech duration
+  min_speech_duration_s: 10         # Minimum speech duration in seconds (5 for takeouts)
+
+# Protocol name to expected language mapping
+# Language codes follow ISO 639-1 + ISO 3166-1 format (e.g., es-PE, en-US, pt-BR)
+# Use extract_protocol_names.py to discover all protocols in your data
+protocol_language_map:
+  # Spanish protocols (Peru)
+  "Recuerdo_agradable": "es-PE"           # Pleasant memory recall
+  "Rutina": "es-PE"                       # Daily routine description
+  "Re-narración_de_video": "es-PE"        # Video re-narration
+  "Lámina_1": "es-PE"                     # Picture description (plate 1)
+  "Lámina_2": "es-PE"                     # Picture description (plate 2)
+  "Descripción_de_imagen": "es-PE"        # Image description
+  "Conversación": "es-PE"                 # Conversation task
+
+  # Add more protocols as needed
+  # Example for other languages:
+  # "English_Description": "en-US"
+  # "Conversa": "pt-BR"
+
+# Model and algorithm parameters
+models:
+  # Voice Activity Detection (Silero VAD)
+  vad_threshold: 0.5                      # Speech confidence threshold (0.0-1.0)
+  vad_min_speech_duration_ms: 250         # Minimum speech chunk duration
+  vad_min_silence_duration_ms: 100        # Minimum silence chunk duration
+  vad_speech_pad_ms: 30                   # Padding around speech segments
+
+  # Speaker count estimation (x-vector clustering)
+  speaker_clustering_distance_threshold: 0.15  # Cosine distance threshold for clustering
+  speaker_chunk_size: 24000               # Samples per chunk (1.5s at 16kHz)
+  speaker_hop_size: 8000                  # Hop size between chunks (0.5s at 16kHz)
+
+  # Language identification
+  langid_model: "speechbrain/lang-id-voxlingua107-ecapa"  # SpeechBrain LangID model
+  langid_confidence_threshold: 0.7        # Minimum confidence to accept detection
+  langid_chunk_count: 5                   # Number of chunks for code-switching detection
+
+# File paths and directories
+paths:
+  checkpoint_dir: "checkpoints"           # Where to store run checkpoints
+  reports_output_dir: "reports_output"    # Base directory for generated reports
+  pretrained_models_dir: "pretrained_models"  # Cached model weights
+
+# Output generation options
+outputs:
+  generate_html_dashboard: true           # Generate interactive HTML dashboard
+  generate_png_plots: true                # Generate PNG plots
+  generate_pdf_plots: true                # Generate PDF plots
+  generate_json_summary: true             # Generate JSON summary report
+  generate_csv_detailed: true             # Generate CSV detailed report
+
+  # Plot styling
+  plot_dpi: 300                           # Resolution for PNG plots
+  plot_style: "seaborn-v0_8"              # Matplotlib style (or "default")
+  plot_font_scale: 1.5                    # Font size multiplier for plots
+
+# Advanced options
+advanced:
+  # Parallelization (for future use)
+  max_workers: 4                          # Number of parallel workers (not implemented yet)
+
+  # Memory management
+  stream_reports_to_disk: true            # Stream reports instead of accumulating in memory
+
+  # Logging
+  log_level: "INFO"                       # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_file: null                          # Set to path for file logging (null = console only)
+
+# Site code definitions (for growth metrics breakdown)
+# First 3 characters of participant_code
+site_codes:
+  - "HUA"  # Huancayo
+  - "IQT"  # Iquitos
+  - "LIM"  # Lima
+  - "TUM"  # Tumbes
+  # Add more sites as needed

@@ -89,7 +89,7 @@ def estimate_speaker_count(
             embedding = model.encode_batch(tensor_chunk)
         # Normalize the embedding (good practice) and remove batch dimension
         embedding = torch.nn.functional.normalize(embedding, p=2, dim=2)
-        embeddings.append(embedding.squeeze().numpy())
+        embeddings.append(embedding.squeeze().cpu().numpy())
     
     if len(embeddings) == 1:
         # Only one chunk of speech could be analyzed
