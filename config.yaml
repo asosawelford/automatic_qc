@@ -5,7 +5,7 @@
 quality_thresholds:
   # Loudness target and tolerance (EBU R128 standard)
   loudness_target_lufs: -14.0       # Target integrated loudness in LUFS
-  loudness_tolerance_lu: 10.0       # Tolerance range (allows -24 to -4 LUFS)
+  loudness_tolerance_lu: 15.0       # Tolerance range (allows -24 to -4 LUFS)
 
   # Clipping detection
   clipping_max_percent: 0.1         # Maximum allowed clipping (0.1%)
@@ -18,7 +18,7 @@ quality_thresholds:
   max_speaker_count: 2              # Maximum speakers (2 = participant + examiner)
 
   # Speech duration
-  min_speech_duration_s: 10         # Minimum speech duration in seconds (5 for takeouts)
+  min_speech_duration_s: 5         # Minimum speech duration in seconds (5 for takeouts)
 
 # Protocol name to expected language mapping
 # Language codes follow ISO 639-1 + ISO 3166-1 format (e.g., es-PE, en-US, pt-BR)

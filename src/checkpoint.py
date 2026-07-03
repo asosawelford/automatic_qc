@@ -4,6 +4,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,8 +63,20 @@ def save_checkpoint(
         "aggregate_metrics": aggregate_metrics,
     }
 
-    with open(path, "w") as f:
-        json.dump(checkpoint, f, indent=2)
+    class _NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return super().default(obj)
+
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(checkpoint, f, indent=2, cls=_NumpyEncoder)
+    os.replace(tmp_path, path)
 
     logger.info(f"Checkpoint saved: {path}")
     return path

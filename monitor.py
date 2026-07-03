@@ -30,9 +30,21 @@ from src.metrics import (
 logger = logging.getLogger("monitor")
 
 
-def discover_audio_files(takeout_path: str) -> List[Dict[str, Any]]:
-    """Scan takeout directory for audio files and their metadata."""
+def discover_audio_files(
+    takeout_path: str,
+    from_date: str = None,
+    to_date: str = None,
+) -> List[Dict[str, Any]]:
+    """Scan takeout directory for audio files and their metadata.
+
+    Args:
+        takeout_path: Root directory to scan.
+        from_date: Include only recordings on or after this date (YYYY-MM-DD).
+        to_date: Include only recordings on or before this date (YYYY-MM-DD).
+    """
     entries = []
+    skipped = 0
+
     for root, dirs, files in os.walk(takeout_path):
         if "audio.webm" in files:
             audio_path = os.path.join(root, "audio.webm")
@@ -40,6 +52,7 @@ def discover_audio_files(takeout_path: str) -> List[Dict[str, Any]]:
 
             participant_code = "Unknown"
             protocol_name = "Unknown"
+            recording_date = None
 
             if os.path.exists(metadata_path):
                 try:
@@ -47,14 +60,37 @@ def discover_audio_files(takeout_path: str) -> List[Dict[str, Any]]:
                         metadata = json.load(f)
                     participant_code = metadata.get("participant_code", "Unknown")
                     protocol_name = metadata.get("protocol_name", "Unknown")
+                    # Extract date from query_timestamp_start or audio_file name
+                    timestamp = metadata.get("query_timestamp_start", "")
+                    if timestamp:
+                        recording_date = timestamp.split(" ")[0]
+                    else:
+                        # Fallback: parse from audio_file field (format: CODE__YYYYMMDD__Task__hash.webm)
+                        audio_filename = metadata.get("audio_file", "")
+                        parts = audio_filename.split("__")
+                        if len(parts) >= 2 and len(parts[1]) == 8 and parts[1].isdigit():
+                            d = parts[1]
+                            recording_date = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
                 except Exception as e:
                     logger.warning(f"Could not read metadata: {metadata_path}: {e}")
+
+            # Date filtering
+            if from_date and recording_date and recording_date < from_date:
+                skipped += 1
+                continue
+            if to_date and recording_date and recording_date > to_date:
+                skipped += 1
+                continue
 
             entries.append({
                 "audio_path": audio_path,
                 "participant_code": participant_code,
                 "protocol_name": protocol_name,
+                "recording_date": recording_date,
             })
+
+    if skipped > 0:
+        logger.info(f"Filtered out {skipped} recordings outside date range [{from_date or '...'} to {to_date or '...'}]")
 
     return entries
 
@@ -85,6 +121,8 @@ def run_monitor(
     skip_langid: bool = False,
     skip_speaker_count: bool = False,
     verbose: bool = False,
+    from_date: str = None,
+    to_date: str = None,
 ) -> Dict[str, Any]:
     """Main monitoring pipeline."""
     run_date = datetime.now().strftime("%Y-%m-%d")
@@ -101,7 +139,7 @@ def run_monitor(
         logger.info("No previous checkpoint found. Processing all files.")
 
     # Discover files
-    entries = discover_audio_files(takeout_path)
+    entries = discover_audio_files(takeout_path, from_date=from_date, to_date=to_date)
     logger.info(f"Found {len(entries)} audio files in takeout.")
 
     # Filter already processed
@@ -118,8 +156,11 @@ def run_monitor(
 
     logger.info(f"New files to process: {len(to_process)} (skipping {len(entries) - len(to_process)} already processed)")
 
-    # Process files
+    # Process files with incremental checkpointing
+    CHECKPOINT_INTERVAL = 50
     reports = []
+    newly_processed_ids = set()
+
     for i, (entry, file_id) in enumerate(to_process, 1):
         if verbose:
             logger.info(f"[{i}/{len(to_process)}] Processing: {entry['participant_code']} - {entry['protocol_name']}")
@@ -141,15 +182,22 @@ def run_monitor(
             report["language_mismatch"] = mismatch
 
         reports.append(report)
+        newly_processed_ids.add(file_id)
 
-    # Compute metrics
+        # Save incremental checkpoint every N files
+        if i % CHECKPOINT_INTERVAL == 0:
+            partial_processed = list(prev_processed | newly_processed_ids)
+            partial_aggregate = compute_aggregate_metrics(reports, config.site_codes)
+            save_checkpoint(checkpoint_dir, partial_processed, partial_aggregate, run_date)
+            logger.info(f"Incremental checkpoint saved ({i}/{len(to_process)} processed)")
+
+    # Final metrics and checkpoint
     participants = {r.get("participant_code") for r in reports if r.get("participant_code") != "Unknown"}
     aggregate = compute_aggregate_metrics(reports, config.site_codes)
     growth = compute_growth_metrics(aggregate, prev_checkpoint, all_file_ids, participants)
     comparison = compute_comparative_metrics(aggregate, prev_checkpoint)
 
-    # Save checkpoint
-    all_processed = list(prev_processed | set(all_file_ids))
+    all_processed = list(prev_processed | newly_processed_ids)
     save_checkpoint(checkpoint_dir, all_processed, aggregate, run_date)
 
     # Build final result
@@ -231,6 +279,8 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--output-dir", help="Output directory for reports")
     parser.add_argument("--checkpoint-dir", help="Checkpoint directory")
+    parser.add_argument("--from-date", help="Only include recordings on or after this date (YYYY-MM-DD)")
+    parser.add_argument("--to-date", help="Only include recordings on or before this date (YYYY-MM-DD)")
     parser.add_argument("--force-reprocess", action="store_true", help="Reprocess all files, ignoring checkpoint")
     parser.add_argument("--skip-langid", action="store_true", help="Skip language detection")
     parser.add_argument("--skip-speaker-count", action="store_true", help="Skip speaker count analysis")
@@ -269,6 +319,8 @@ def main():
         skip_langid=args.skip_langid,
         skip_speaker_count=args.skip_speaker_count,
         verbose=args.verbose,
+        from_date=args.from_date,
+        to_date=args.to_date,
     )
 
     # Generate outputs
